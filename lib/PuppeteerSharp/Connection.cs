@@ -189,7 +189,7 @@ namespace PuppeteerSharp
                     {
                         return null;
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
                         if (!IsClosed)
                         {

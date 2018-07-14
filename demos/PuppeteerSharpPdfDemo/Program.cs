@@ -24,14 +24,18 @@ namespace PuppeteerSharpPdfDemo
             {
                 await page.GoToAsync("http://www.google.com");
 
-                Console.WriteLine("Generating PDF");
-                await page.PdfAsync(Path.Combine(Directory.GetCurrentDirectory(), "google.pdf"));
-
-                Console.WriteLine("Export completed");
-
-                if (!args.Any(arg => arg == "auto-exit"))
+                while (true)
                 {
-                    Console.ReadLine();
+                    await Task.Delay(3000);
+                    Console.WriteLine("Generating PDF");
+                    await page.PdfAsync(Path.Combine(Directory.GetCurrentDirectory(), "google.pdf"));
+
+                    Console.WriteLine("Export completed");
+
+                    if (!args.Any(arg => arg == "auto-exit"))
+                    {
+                        Console.ReadLine();
+                    }
                 }
             }
         }
