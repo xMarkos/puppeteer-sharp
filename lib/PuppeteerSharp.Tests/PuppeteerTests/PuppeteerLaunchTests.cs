@@ -317,13 +317,7 @@ namespace PuppeteerSharp.Tests.PuppeteerTests
             process.StartInfo.UseShellExecute = false;
             process.StartInfo.RedirectStandardOutput = true;
 
-            process.OutputDataReceived += (sender, e) =>
-            {
-                if (!webSocketTaskWrapper.Task.IsCompleted)
-                {
-                    webSocketTaskWrapper.SetResult(e.Data);
-                }
-            };
+            process.OutputDataReceived += (sender, e) => webSocketTaskWrapper.TrySetResult(e.Data);
 
             process.Start();
             process.BeginOutputReadLine();
@@ -375,7 +369,7 @@ namespace PuppeteerSharp.Tests.PuppeteerTests
                 dir,
                 "bin",
                 build,
-                "netcoreapp2.0");
+                "netcoreapp2.1");
 #else
                 return Path.Combine(
                 TestUtils.FindParentDirectory("lib"),
