@@ -36,14 +36,15 @@ namespace PuppeteerSharp.Tests
         protected static Task<dynamic> WaitEvent(CDPSession emitter, string eventName)
         {
             var completion = new TaskCompletionSource<dynamic>();
-            void handler(object sender, MessageEventArgs e)
+            Task handler(object sender, MessageEventArgs e)
             {
-                if (e.MessageID != eventName)
+                if (e.MessageID == eventName)
                 {
-                    return;
+                    emitter.MessageReceived -= handler;
+                    completion.SetResult(e.MessageData);
                 }
-                emitter.MessageReceived -= handler;
-                completion.SetResult(e.MessageData);
+
+                return Task.CompletedTask;
             }
 
             emitter.MessageReceived += handler;

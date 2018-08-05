@@ -83,7 +83,7 @@ namespace PuppeteerSharp.Tests.TracingTests
             using (var file = File.OpenText(_file))
             using (var reader = new JsonTextReader(file))
             {
-                var traceJson = JToken.ReadFrom(reader);
+                var traceJson = await JToken.ReadFromAsync(reader);
                 Assert.Contains("disabled-by-default-v8.cpu_profiler.hires", traceJson["metadata"]["trace-config"].ToString());
             }
         }

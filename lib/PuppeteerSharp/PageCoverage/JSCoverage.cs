@@ -88,7 +88,7 @@ namespace PuppeteerSharp.PageCoverage
             return coverage.ToArray();
         }
 
-        private async void client_MessageReceived(object sender, MessageEventArgs e)
+        private async Task client_MessageReceived(object sender, MessageEventArgs e)
         {
             switch (e.MessageID)
             {

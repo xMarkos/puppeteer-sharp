@@ -39,7 +39,7 @@ namespace PuppeteerSharp.Tests.PageTests
             await Page.AddScriptTagAsync(new AddTagOptions
             {
                 Content = "window.e = 10;"
-            }).ContinueWith(_ => Task.CompletedTask);
+            });
             Assert.Null(await Page.EvaluateExpressionAsync("window.e"));
         }
     }

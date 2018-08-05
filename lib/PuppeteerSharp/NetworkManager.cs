@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using PuppeteerSharp.Helpers;
 using PuppeteerSharp.Messaging;
+using PuppeteerSharp.Threading;
 
 namespace PuppeteerSharp
 {
@@ -38,10 +39,10 @@ namespace PuppeteerSharp
 
         #region Public Properties
         internal Dictionary<string, string> ExtraHTTPHeaders => _extraHTTPHeaders?.Clone();
-        internal event EventHandler<ResponseCreatedEventArgs> Response;
-        internal event EventHandler<RequestEventArgs> Request;
-        internal event EventHandler<RequestEventArgs> RequestFinished;
-        internal event EventHandler<RequestEventArgs> RequestFailed;
+        internal event AsyncEventHandler<ResponseCreatedEventArgs> Response;
+        internal event AsyncEventHandler<RequestEventArgs> Request;
+        internal event AsyncEventHandler<RequestEventArgs> RequestFinished;
+        internal event AsyncEventHandler<RequestEventArgs> RequestFailed;
         #endregion
 
         #region Public Methods
@@ -98,7 +99,7 @@ namespace PuppeteerSharp
 
         #region Private Methods
 
-        private async void Client_MessageReceived(object sender, MessageEventArgs e)
+        private Task Client_MessageReceived(object sender, MessageEventArgs e)
         {
             switch (e.MessageID)
             {
@@ -106,24 +107,22 @@ namespace PuppeteerSharp
                     OnRequestWillBeSent(e.MessageData.ToObject<RequestWillBeSentResponse>());
                     break;
                 case "Network.requestIntercepted":
-                    await OnRequestInterceptedAsync(e.MessageData.ToObject<RequestInterceptedResponse>()).ConfigureAwait(false);
-                    break;
+                    return OnRequestInterceptedAsync(e.MessageData.ToObject<RequestInterceptedResponse>());
                 case "Network.requestServedFromCache":
                     OnRequestServedFromCache(e.MessageData.ToObject<RequestServedFromCacheResponse>());
                     break;
                 case "Network.responseReceived":
-                    OnResponseReceived(e.MessageData.ToObject<ResponseReceivedResponse>());
-                    break;
+                    return OnResponseReceivedAsync(e.MessageData.ToObject<ResponseReceivedResponse>());
                 case "Network.loadingFinished":
-                    OnLoadingFinished(e.MessageData.ToObject<LoadingFinishedResponse>());
-                    break;
+                    return OnLoadingFinished(e.MessageData.ToObject<LoadingFinishedResponse>());
                 case "Network.loadingFailed":
-                    OnLoadingFailed(e.MessageData.ToObject<LoadingFailedResponse>());
-                    break;
+                    return OnLoadingFailed(e.MessageData.ToObject<LoadingFailedResponse>());
             }
+
+            return Task.CompletedTask;
         }
 
-        private void OnLoadingFailed(LoadingFailedResponse e)
+        private async Task OnLoadingFailed(LoadingFailedResponse e)
         {
             // For certain requestIds we never receive requestWillBeSent event.
             // @see https://crbug.com/750469
@@ -138,14 +137,14 @@ namespace PuppeteerSharp
                     _interceptionIdToRequest.Remove(request.InterceptionId);
                     _attemptedAuthentications.Remove(request.InterceptionId);
                 }
-                RequestFailed(this, new RequestEventArgs
+                await RequestFailed(this, new RequestEventArgs
                 {
                     Request = request
-                });
+                }).ConfigureAwait(false);
             }
         }
 
-        private void OnLoadingFinished(LoadingFinishedResponse e)
+        private async Task OnLoadingFinished(LoadingFinishedResponse e)
         {
             // For certain requestIds we never receive requestWillBeSent event.
             // @see https://crbug.com/750469
@@ -160,14 +159,14 @@ namespace PuppeteerSharp
                     _attemptedAuthentications.Remove(request.InterceptionId);
                 }
 
-                RequestFinished?.Invoke(this, new RequestEventArgs
+                await RequestFinished.SafeInvoke(this, new RequestEventArgs
                 {
                     Request = request
-                });
+                }).ConfigureAwait(false);
             }
         }
 
-        private void OnResponseReceived(ResponseReceivedResponse e)
+        private async Task OnResponseReceivedAsync(ResponseReceivedResponse e)
         {
             // FileUpload sends a response without a matching request.
             if (_requestIdToRequest.TryGetValue(e.RequestId, out var request))
@@ -183,10 +182,10 @@ namespace PuppeteerSharp
 
                 request.Response = response;
 
-                Response?.Invoke(this, new ResponseCreatedEventArgs
+                await Response.SafeInvoke(this, new ResponseCreatedEventArgs
                 {
                     Response = response
-                });
+                }).ConfigureAwait(false);
             }
         }
 

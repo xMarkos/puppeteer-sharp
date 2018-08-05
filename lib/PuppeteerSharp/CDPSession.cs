@@ -4,6 +4,7 @@ using Newtonsoft.Json;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 using Microsoft.Extensions.Logging;
+using PuppeteerSharp.Threading;
 
 namespace PuppeteerSharp
 {
@@ -70,11 +71,11 @@ namespace PuppeteerSharp
         /// <summary>
         /// Occurs when message received from Chromium.
         /// </summary>
-        public event EventHandler<MessageEventArgs> MessageReceived;
+        public event AsyncEventHandler<MessageEventArgs> MessageReceived;
         /// <summary>
         /// Occurs when tracing is completed.
         /// </summary>
-        public event EventHandler<TracingCompleteEventArgs> TracingComplete;
+        public event AsyncEventHandler<TracingCompleteEventArgs> TracingComplete;
         /// <summary>
         /// Gets or sets a value indicating whether this <see cref="CDPSession"/> is closed.
         /// </summary>
@@ -167,7 +168,7 @@ namespace PuppeteerSharp
             }).GetAwaiter().GetResult();
         }
 
-        internal void OnMessage(string message)
+        internal Task OnMessage(string message)
         {
             dynamic obj = JsonConvert.DeserializeObject(message);
             var objAsJObject = obj as JObject;
@@ -196,17 +197,19 @@ namespace PuppeteerSharp
                         callback.TaskWrapper.SetResult(obj.result);
                     }
                 }
+
+                return Task.CompletedTask;
             }
             else if (obj.method == "Tracing.tracingComplete")
             {
-                TracingComplete?.Invoke(this, new TracingCompleteEventArgs
+                return TracingComplete.SafeInvoke(this, new TracingCompleteEventArgs
                 {
                     Stream = objAsJObject["params"].Value<string>("stream")
                 });
             }
             else
             {
-                MessageReceived?.Invoke(this, new MessageEventArgs
+                return MessageReceived.SafeInvoke(this, new MessageEventArgs
                 {
                     MessageID = obj.method,
                     MessageData = objAsJObject["params"]

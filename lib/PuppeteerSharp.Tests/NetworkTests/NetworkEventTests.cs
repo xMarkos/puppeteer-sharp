@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Newtonsoft.Json.Linq;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -164,9 +165,9 @@ namespace PuppeteerSharp.Tests.NetworkTests
         public async Task PageEventsRequestFailed()
         {
             await Page.SetRequestInterceptionAsync(true);
-            Page.Request += async (sender, e) =>
+            Page.RequestAsync += async (sender, e) =>
             {
-                if (e.Request.Url.EndsWith("css"))
+                if (e.Request.Url.EndsWith("css", StringComparison.Ordinal))
                 {
                     await e.Request.AbortAsync();
                 }

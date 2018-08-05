@@ -36,7 +36,7 @@ namespace PuppeteerSharp.Tests.PageTests
             await Page.GoToAsync(TestConstants.ServerUrl + "/beforeunload.html");
 
             var dialogTask = new TaskCompletionSource<bool>();
-            Page.Dialog += async (sender, e) =>
+            Page.DialogAsync += async (sender, e) =>
             {
                 Assert.Equal(DialogType.BeforeUnload, e.Dialog.DialogType);
                 Assert.Equal(string.Empty, e.Dialog.Message);

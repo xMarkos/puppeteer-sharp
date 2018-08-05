@@ -35,7 +35,7 @@ namespace PuppeteerSharp.Tests.NetworkTests
         public async Task ShouldWorkWithRequestInterception()
         {
             var requests = new Dictionary<string, Request>();
-            Page.Request += async (sender, e) =>
+            Page.RequestAsync += async (sender, e) =>
             {
                 requests[e.Request.Url.Split('/').Last()] = e.Request;
                 await e.Request.ContinueAsync();

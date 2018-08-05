@@ -55,19 +55,23 @@ namespace PuppeteerSharp
             frameManager.FrameDetached += CheckLifecycleComplete;
             LifeCycleCompleteTaskWrapper = new TaskCompletionSource<bool>();
 
-            NavigationTask = Task.WhenAny(new[]
+            async Task NavigateWithTimeout()
             {
-                CreateTimeoutTask(),
-                LifeCycleCompleteTask,
-            }).ContinueWith((task) =>
-            {
+                Task t = await Task.WhenAny(new[]
+                    {
+                        CreateTimeoutTask(),
+                        LifeCycleCompleteTask,
+                    }).ConfigureAwait(false);
+
                 CleanUp();
-                return task.GetAwaiter().GetResult();
-            });
+                t.GetAwaiter().GetResult();
+            }
+
+            NavigationTask = NavigateWithTimeout();
         }
 
         #region Properties
-        public Task<Task> NavigationTask { get; internal set; }
+        public Task NavigationTask { get; internal set; }
         public Task<bool> LifeCycleCompleteTask => LifeCycleCompleteTaskWrapper.Task;
         public TaskCompletionSource<bool> LifeCycleCompleteTaskWrapper { get; }
 
@@ -78,29 +82,31 @@ namespace PuppeteerSharp
         #endregion
         #region Private methods
 
-        private void CheckLifecycleComplete(object sender, FrameEventArgs e)
+        private Task CheckLifecycleComplete(object sender, FrameEventArgs e)
         {
             // We expect navigation to commit.
             if (_frame.LoaderId == _initialLoaderId && !_hasSameDocumentNavigation)
             {
-                return;
+                return Task.CompletedTask;
             }
             if (!CheckLifecycle(_frame, _expectedLifecycle))
             {
-                return;
+                return Task.CompletedTask;
             }
 
             LifeCycleCompleteTaskWrapper.TrySetResult(true);
+
+            return Task.CompletedTask;
         }
 
-        private void NavigatedWithinDocument(object sender, FrameEventArgs e)
+        private async Task NavigatedWithinDocument(object sender, FrameEventArgs e)
         {
             if (e.Frame != _frame)
             {
                 return;
             }
             _hasSameDocumentNavigation = true;
-            CheckLifecycleComplete(sender, e);
+            await CheckLifecycleComplete(sender, e).ConfigureAwait(false);
         }
 
         private bool CheckLifecycle(Frame frame, IEnumerable<string> expectedLifecycle)

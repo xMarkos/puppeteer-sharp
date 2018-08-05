@@ -15,6 +15,7 @@ using PuppeteerSharp.Media;
 using PuppeteerSharp.Messaging;
 using PuppeteerSharp.Mobile;
 using PuppeteerSharp.PageCoverage;
+using PuppeteerSharp.Threading;
 
 namespace PuppeteerSharp
 {
@@ -69,19 +70,18 @@ namespace PuppeteerSharp
 
             _screenshotTaskQueue = screenshotTaskQueue;
 
-            _frameManager.FrameAttached += (sender, e) => FrameAttached?.Invoke(this, e);
-            _frameManager.FrameDetached += (sender, e) => FrameDetached?.Invoke(this, e);
-            _frameManager.FrameNavigated += (sender, e) => FrameNavigated?.Invoke(this, e);
+            _frameManager.FrameAttached += (sender, e) => _frameAttached.InvokeAsync(this, e);
+            _frameManager.FrameDetached += (sender, e) => _frameDetached.InvokeAsync(this, e);
+            _frameManager.FrameNavigated += (sender, e) => _frameNavigated.InvokeAsync(this, e);
 
-            _networkManager.Request += (sender, e) => Request?.Invoke(this, e);
-            _networkManager.RequestFailed += (sender, e) => RequestFailed?.Invoke(this, e);
-            _networkManager.Response += (sender, e) => Response?.Invoke(this, e);
-            _networkManager.RequestFinished += (sender, e) => RequestFinished?.Invoke(this, e);
+            _networkManager.Request += (sender, e) => _request.InvokeAsync(this, e);
+            _networkManager.RequestFailed += (sender, e) => _requestFailed.InvokeAsync(this, e);
+            _networkManager.Response += (sender, e) => _response.InvokeAsync(this, e);
+            _networkManager.RequestFinished += (sender, e) => _requestFinished.InvokeAsync(this, e);
 
-            target.CloseTask.ContinueWith((arg) => {
-                Close?.Invoke(this, EventArgs.Empty);
-                IsClosed = true;
-            });
+            target.CloseTask
+                .ContinueWith(t => _close.InvokeAsync(this, EventArgs.Empty)).Unwrap()
+                .ContinueWith(t => IsClosed = true);
 
             Client.MessageReceived += Client_MessageReceived;
         }
@@ -90,30 +90,101 @@ namespace PuppeteerSharp
 
         #region Public Properties
 
+        private EventInvocationList<EventArgs> _load = new EventInvocationList<EventArgs>();
+        private EventInvocationList<ErrorEventArgs> _error = new EventInvocationList<ErrorEventArgs>();
+        private EventInvocationList<MetricEventArgs> _metrics = new EventInvocationList<MetricEventArgs>();
+        private EventInvocationList<DialogEventArgs> _dialog = new EventInvocationList<DialogEventArgs>();
+        private EventInvocationList<EventArgs> _domContentLoaded = new EventInvocationList<EventArgs>();
+        private EventInvocationList<ConsoleEventArgs> _console = new EventInvocationList<ConsoleEventArgs>();
+        private EventInvocationList<FrameEventArgs> _frameAttached = new EventInvocationList<FrameEventArgs>();
+        private EventInvocationList<FrameEventArgs> _frameDetached = new EventInvocationList<FrameEventArgs>();
+        private EventInvocationList<FrameEventArgs> _frameNavigated = new EventInvocationList<FrameEventArgs>();
+        private EventInvocationList<ResponseCreatedEventArgs> _response = new EventInvocationList<ResponseCreatedEventArgs>();
+        private EventInvocationList<RequestEventArgs> _request = new EventInvocationList<RequestEventArgs>();
+        private EventInvocationList<RequestEventArgs> _requestFinished = new EventInvocationList<RequestEventArgs>();
+        private EventInvocationList<RequestEventArgs> _requestFailed = new EventInvocationList<RequestEventArgs>();
+        private EventInvocationList<PageErrorEventArgs> _pageError = new EventInvocationList<PageErrorEventArgs>();
+        private EventInvocationList<EventArgs> _close = new EventInvocationList<EventArgs>();
+
         /// <summary>
         /// Raised when the JavaScript <c>load</c> <see href="https://developer.mozilla.org/en-US/docs/Web/Events/load"/> event is dispatched.
         /// </summary>
-        public event EventHandler Load;
+        public event EventHandler Load
+        {
+            add => _load.Add(value.ConvertToGenericDelegate());
+            remove => _load.Remove(value.ConvertToGenericDelegate());
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.Load" />
+        public event AsyncEventHandler<EventArgs> LoadAsync
+        {
+            add => _load.Add(value);
+            remove => _load.Remove(value);
+        }
 
         /// <summary>
         /// Raised when the page crashes
         /// </summary>
-        public event EventHandler<ErrorEventArgs> Error;
+        public event EventHandler<ErrorEventArgs> Error
+        {
+            add => _error.Add(value);
+            remove => _error.Remove(value);
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.Error" />
+        public event AsyncEventHandler<ErrorEventArgs> ErrorAsync
+        {
+            add => _error.Add(value);
+            remove => _error.Remove(value);
+        }
 
         /// <summary>
-        /// Raised when the JavaScript code makes a call to <c>console.timeStamp</c>. For the list of metrics see <see cref="Page.MetricsAsync"/>.
+        /// Raised when the JavaScript code makes a call to <c>console.timeStamp</c>. For the list of metrics see <see cref="Page.SupportedMetrics"/>.
         /// </summary>
-        public event EventHandler<MetricEventArgs> Metrics;
+        public event EventHandler<MetricEventArgs> Metrics
+        {
+            add => _metrics.Add(value);
+            remove => _metrics.Remove(value);
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.Metrics" />
+        public event AsyncEventHandler<MetricEventArgs> MetricsAsyncEvent
+        {
+            add => _metrics.Add(value);
+            remove => _metrics.Remove(value);
+        }
 
         /// <summary>
         /// Raised when a JavaScript dialog appears, such as <c>alert</c>, <c>prompt</c>, <c>confirm</c> or <c>beforeunload</c>. Puppeteer can respond to the dialog via <see cref="Dialog"/>'s <see cref="Dialog.Accept(string)"/> or <see cref="Dialog.Dismiss"/> methods.
         /// </summary>
-        public event EventHandler<DialogEventArgs> Dialog;
+        public event EventHandler<DialogEventArgs> Dialog
+        {
+            add => _dialog.Add(value);
+            remove => _dialog.Remove(value);
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.Dialog" />
+        public event AsyncEventHandler<DialogEventArgs> DialogAsync
+        {
+            add => _dialog.Add(value);
+            remove => _dialog.Remove(value);
+        }
 
         /// <summary>
         /// Raised when the JavaScript <c>DOMContentLoaded</c> <see href="https://developer.mozilla.org/en-US/docs/Web/Events/DOMContentLoaded"/> event is dispatched.
         /// </summary>
-        public event EventHandler DOMContentLoaded;
+        public event EventHandler DOMContentLoaded
+        {
+            add => _domContentLoaded.Add(value.ConvertToGenericDelegate());
+            remove => _domContentLoaded.Remove(value.ConvertToGenericDelegate());
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.DOMContentLoaded" />
+        public event AsyncEventHandler<EventArgs> DOMContentLoadedAsync
+        {
+            add => _domContentLoaded.Add(value);
+            remove => _domContentLoaded.Remove(value);
+        }
 
         /// <summary>
         /// Raised when JavaScript within the page calls one of console API methods, e.g. <c>console.log</c> or <c>console.dir</c>. Also emitted if the page throws an error or a warning.
@@ -133,53 +204,163 @@ namespace PuppeteerSharp
         /// ]]>
         /// </code>
         /// </example>
-        public event EventHandler<ConsoleEventArgs> Console;
+        public event EventHandler<ConsoleEventArgs> Console
+        {
+            add => _console.Add(value);
+            remove => _console.Remove(value);
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.Console" />
+        public event AsyncEventHandler<ConsoleEventArgs> ConsoleAsync
+        {
+            add => _console.Add(value);
+            remove => _console.Remove(value);
+        }
 
         /// <summary>
         /// Raised when a frame is attached.
         /// </summary>
-        public event EventHandler<FrameEventArgs> FrameAttached;
+        public event EventHandler<FrameEventArgs> FrameAttached
+        {
+            add => _frameAttached.Add(value);
+            remove => _frameAttached.Remove(value);
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.FrameAttached" />
+        public event AsyncEventHandler<FrameEventArgs> FrameAttachedAsync
+        {
+            add => _frameAttached.Add(value);
+            remove => _frameAttached.Remove(value);
+        }
 
         /// <summary>
         /// Raised when a frame is detached.
         /// </summary>
-        public event EventHandler<FrameEventArgs> FrameDetached;
+        public event EventHandler<FrameEventArgs> FrameDetached
+        {
+            add => _frameDetached.Add(value);
+            remove => _frameDetached.Remove(value);
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.FrameDetached" />
+        public event AsyncEventHandler<FrameEventArgs> FrameDetachedAsync
+        {
+            add => _frameDetached.Add(value);
+            remove => _frameDetached.Remove(value);
+        }
 
         /// <summary>
         /// Raised when a frame is navigated to a new url.
         /// </summary>
-        public event EventHandler<FrameEventArgs> FrameNavigated;
+        public event EventHandler<FrameEventArgs> FrameNavigated
+        {
+            add => _frameNavigated.Add(value);
+            remove => _frameNavigated.Remove(value);
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.FrameNavigated" />
+        public event AsyncEventHandler<FrameEventArgs> FrameNavigatedAsync
+        {
+            add => _frameNavigated.Add(value);
+            remove => _frameNavigated.Remove(value);
+        }
 
         /// <summary>
         /// Raised when a <see cref="Response"/> is received.
         /// </summary>
-        public event EventHandler<ResponseCreatedEventArgs> Response;
+        public event EventHandler<ResponseCreatedEventArgs> Response
+        {
+            add => _response.Add(value);
+            remove => _response.Remove(value);
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.Response" />
+        public event AsyncEventHandler<ResponseCreatedEventArgs> ResponseAsync
+        {
+            add => _response.Add(value);
+            remove => _response.Remove(value);
+        }
 
         /// <summary>
         /// Raised when a page issues a request. The <see cref="Request"/> object is read-only.
         /// In order to intercept and mutate requests, see <see cref="SetRequestInterceptionAsync(bool)"/>
         /// </summary>
-        public event EventHandler<RequestEventArgs> Request;
+        public event EventHandler<RequestEventArgs> Request
+        {
+            add => _request.Add(value);
+            remove => _request.Remove(value);
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.Request" />
+        public event AsyncEventHandler<RequestEventArgs> RequestAsync
+        {
+            add => _request.Add(value);
+            remove => _request.Remove(value);
+        }
 
         /// <summary>
         /// Raised when a request finishes successfully.
         /// </summary>
-        public event EventHandler<RequestEventArgs> RequestFinished;
+        public event EventHandler<RequestEventArgs> RequestFinished
+        {
+            add => _requestFinished.Add(value);
+            remove => _requestFinished.Remove(value);
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.RequestFinished" />
+        public event AsyncEventHandler<RequestEventArgs> RequestFinishedAsync
+        {
+            add => _requestFinished.Add(value);
+            remove => _requestFinished.Remove(value);
+        }
 
         /// <summary>
         /// Raised when a request fails, for example by timing out.
         /// </summary>
-        public event EventHandler<RequestEventArgs> RequestFailed;
+        public event EventHandler<RequestEventArgs> RequestFailed
+        {
+            add => _requestFailed.Add(value);
+            remove => _requestFailed.Remove(value);
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.RequestFailed" />
+        public event AsyncEventHandler<RequestEventArgs> RequestFailedAsync
+        {
+            add => _requestFailed.Add(value);
+            remove => _requestFailed.Remove(value);
+        }
 
         /// <summary>
         /// Raised when an uncaught exception happens within the page.
         /// </summary>
-        public event EventHandler<PageErrorEventArgs> PageError;
+        public event EventHandler<PageErrorEventArgs> PageError
+        {
+            add => _pageError.Add(value);
+            remove => _pageError.Remove(value);
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.PageError" />
+        public event AsyncEventHandler<PageErrorEventArgs> PageErrorAsync
+        {
+            add => _pageError.Add(value);
+            remove => _pageError.Remove(value);
+        }
 
         /// <summary>
         /// Raised when the page closes.
         /// </summary>
-        public event EventHandler Close;
+        public event EventHandler Close
+        {
+            add => _close.Add(value.ConvertToGenericDelegate());
+            remove => _close.Remove(value.ConvertToGenericDelegate());
+        }
+
+        /// <inheritdoc cref="PuppeteerSharp.Page.Close" />
+        public event AsyncEventHandler<EventArgs> CloseAsyncEvent
+        {
+            add => _close.Add(value);
+            remove => _close.Remove(value);
+        }
 
         /// <summary>
         /// This setting will change the default maximum navigation time of 30 seconds for the following methods:
@@ -269,7 +450,7 @@ namespace PuppeteerSharp
         /// Get the browser the page belongs to.
         /// </summary>
         public Browser Browser => Target.Browser;
-        
+
         /// <summary>
         /// Get an indication that the page has been closed.
         /// </summary>
@@ -669,12 +850,14 @@ namespace PuppeteerSharp
             var referrer = _networkManager.ExtraHTTPHeaders?.GetValueOrDefault("referer");
             var requests = new Dictionary<string, Request>();
 
-            void createRequestEventListener(object sender, RequestEventArgs e)
+            Task createRequestEventListener(object sender, RequestEventArgs e)
             {
                 if (!requests.ContainsKey(e.Request.Url))
                 {
                     requests.Add(e.Request.Url, e.Request);
                 }
+
+                return Task.CompletedTask;
             }
 
             _networkManager.Request += createRequestEventListener;
@@ -685,28 +868,23 @@ namespace PuppeteerSharp
             var watcher = new NavigatorWatcher(_frameManager, mainFrame, timeout, options);
             var navigateTask = Navigate(Client, url, referrer);
 
-            await Task.WhenAny(
-                watcher.NavigationTask,
-                navigateTask).ConfigureAwait(false);
+            Task completedTask = await Task.WhenAny(
+                                    watcher.NavigationTask,
+                                    navigateTask).ConfigureAwait(false);
 
             AggregateException exception = null;
 
-            if (navigateTask.IsFaulted)
+            if (completedTask.IsFaulted)
             {
-                exception = navigateTask.Exception;
+                exception = completedTask.Exception;
             }
-            else if (watcher.NavigationTask.IsCompleted &&
-                watcher.NavigationTask.Result.IsFaulted)
-            {
-                exception = watcher.NavigationTask.Result?.Exception;
-            }
-
-            if (exception == null)
+            else
             {
                 await Task.WhenAll(
                     watcher.NavigationTask,
                     navigateTask).ConfigureAwait(false);
-                exception = navigateTask.Exception ?? watcher.NavigationTask.Result.Exception;
+
+                exception = navigateTask.Exception ?? watcher.NavigationTask.Exception;
             }
 
             watcher.Cancel();
@@ -1341,7 +1519,11 @@ namespace PuppeteerSharp
             var watcher = new NavigatorWatcher(_frameManager, mainFrame, timeout, options);
             var responses = new Dictionary<string, Response>();
 
-            void createResponseEventListener(object sender, ResponseCreatedEventArgs e) => responses[e.Response.Url] = e.Response;
+            Task createResponseEventListener(object sender, ResponseCreatedEventArgs e)
+            {
+                responses[e.Response.Url] = e.Response;
+                return Task.CompletedTask;
+            }
 
             _networkManager.Response += createResponseEventListener;
 
@@ -1600,41 +1782,34 @@ namespace PuppeteerSharp
             return pixels / 96;
         }
 
-        private async void Client_MessageReceived(object sender, MessageEventArgs e)
+        private Task Client_MessageReceived(object sender, MessageEventArgs e)
         {
             switch (e.MessageID)
             {
                 case "Page.domContentEventFired":
-                    DOMContentLoaded?.Invoke(this, EventArgs.Empty);
-                    break;
+                    return _domContentLoaded.InvokeAsync(this, EventArgs.Empty);
                 case "Page.loadEventFired":
-                    Load?.Invoke(this, EventArgs.Empty);
-                    break;
+                    return _load.InvokeAsync(this, EventArgs.Empty);
                 case "Runtime.consoleAPICalled":
-                    await OnConsoleAPI(e.MessageData.ToObject<PageConsoleResponse>()).ConfigureAwait(false);
-                    break;
+                    return OnConsoleAPI(e.MessageData.ToObject<PageConsoleResponse>());
                 case "Page.javascriptDialogOpening":
-                    OnDialog(e.MessageData.ToObject<PageJavascriptDialogOpeningResponse>());
-                    break;
+                    return OnDialog(e.MessageData.ToObject<PageJavascriptDialogOpeningResponse>());
                 case "Runtime.exceptionThrown":
-                    HandleException(e.MessageData.SelectToken("exceptionDetails").ToObject<EvaluateExceptionDetails>());
-                    break;
+                    return HandleException(e.MessageData.SelectToken("exceptionDetails").ToObject<EvaluateExceptionDetails>());
                 case "Security.certificateError":
-                    await OnCertificateError(e.MessageData.ToObject<CertificateErrorResponse>()).ConfigureAwait(false);
-                    break;
+                    return OnCertificateError(e.MessageData.ToObject<CertificateErrorResponse>());
                 case "Inspector.targetCrashed":
-                    OnTargetCrashed();
-                    break;
+                    return OnTargetCrashed();
                 case "Performance.metrics":
-                    EmitMetrics(e.MessageData.ToObject<PerformanceMetricsResponse>());
-                    break;
+                    return EmitMetrics(e.MessageData.ToObject<PerformanceMetricsResponse>());
                 case "Log.entryAdded":
-                    OnLogEntryAdded(e.MessageData.ToObject<LogEntryAddedResponse>());
-                    break;
+                    return OnLogEntryAdded(e.MessageData.ToObject<LogEntryAddedResponse>());
             }
+
+            return Task.CompletedTask;
         }
 
-        private void OnLogEntryAdded(LogEntryAddedResponse e)
+        private Task OnLogEntryAdded(LogEntryAddedResponse e)
         {
             if (e.Entry.Args != null)
             {
@@ -1643,21 +1818,22 @@ namespace PuppeteerSharp
                     RemoteObjectHelper.ReleaseObject(Client, arg, _logger);
                 }
             }
-            Console?.Invoke(this, new ConsoleEventArgs(new ConsoleMessage(e.Entry.Level, e.Entry.Text)));
+
+            return _console.InvokeAsync(this, new ConsoleEventArgs(new ConsoleMessage(e.Entry.Level, e.Entry.Text)));
         }
 
-        private void OnTargetCrashed()
+        private Task OnTargetCrashed()
         {
-            if (Error == null)
+            if (_error.IsEmpty)
             {
                 throw new TargetCrashedException();
             }
 
-            Error.Invoke(this, new ErrorEventArgs("Page crashed!"));
+            return _error.InvokeAsync(this, new ErrorEventArgs("Page crashed!"));
         }
 
-        private void EmitMetrics(PerformanceMetricsResponse metrics)
-            => Metrics?.Invoke(this, new MetricEventArgs(metrics.Title, BuildMetricsObject(metrics.Metrics)));
+        private Task EmitMetrics(PerformanceMetricsResponse metrics)
+            => _metrics.InvokeAsync(this, new MetricEventArgs(metrics.Title, BuildMetricsObject(metrics.Metrics)));
 
         private async Task OnCertificateError(CertificateErrorResponse e)
         {
@@ -1678,8 +1854,8 @@ namespace PuppeteerSharp
             }
         }
 
-        private void HandleException(EvaluateExceptionDetails exceptionDetails)
-            => PageError?.Invoke(this, new PageErrorEventArgs(GetExceptionMessage(exceptionDetails)));
+        private Task HandleException(EvaluateExceptionDetails exceptionDetails)
+            => _pageError.InvokeAsync(this, new PageErrorEventArgs(GetExceptionMessage(exceptionDetails)));
 
         private string GetExceptionMessage(EvaluateExceptionDetails exceptionDetails)
         {
@@ -1700,10 +1876,10 @@ namespace PuppeteerSharp
             return message;
         }
 
-        private void OnDialog(PageJavascriptDialogOpeningResponse message)
+        private Task OnDialog(PageJavascriptDialogOpeningResponse message)
         {
             var dialog = new Dialog(Client, message.Type, message.Message, message.DefaultPrompt);
-            Dialog?.Invoke(this, new DialogEventArgs(dialog));
+            return _dialog.InvokeAsync(this, new DialogEventArgs(dialog));
         }
 
         private async Task OnConsoleAPI(PageConsoleResponse message)
@@ -1747,7 +1923,7 @@ namespace PuppeteerSharp
                 return;
             }
 
-            if (Console?.GetInvocationList().Length == 0)
+            if (_console.IsEmpty)
             {
                 foreach (var arg in message.Args)
                 {
@@ -1765,7 +1941,7 @@ namespace PuppeteerSharp
                 ? handle.ToString() : RemoteObjectHelper.ValueFromRemoteObject<object>(handle.RemoteObject));
 
             var consoleMessage = new ConsoleMessage(message.Type, string.Join(" ", handles), values);
-            Console?.Invoke(this, new ConsoleEventArgs(consoleMessage));
+            await _console.InvokeAsync(this, new ConsoleEventArgs(consoleMessage)).ConfigureAwait(false);
         }
 
         private async Task ExposeFunctionAsync(string name, Delegate puppeteerFunction)

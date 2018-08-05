@@ -18,7 +18,7 @@ namespace PuppeteerSharp.Tests.RequestTests
         public async Task ShouldWork()
         {
             await Page.SetRequestInterceptionAsync(true);
-            Page.Request += async (sender, e) =>
+            Page.RequestAsync += async (sender, e) =>
             {
                 await e.Request.RespondAsync(new ResponseData
                 {
@@ -41,7 +41,7 @@ namespace PuppeteerSharp.Tests.RequestTests
         public async Task ShouldAllowMockingBinaryResponses()
         {
             await Page.SetRequestInterceptionAsync(true);
-            Page.Request += async (sender, e) =>
+            Page.RequestAsync += async (sender, e) =>
             {
                 var imageData = File.ReadAllBytes("./assets/pptr.png");
                 await e.Request.RespondAsync(new ResponseData

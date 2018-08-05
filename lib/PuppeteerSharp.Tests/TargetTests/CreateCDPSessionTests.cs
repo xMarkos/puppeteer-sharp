@@ -41,6 +41,8 @@ namespace PuppeteerSharp.Tests.TargetTests
                 {
                     events.Add(e.MessageData);
                 }
+
+                return Task.CompletedTask;
             };
 
             await Page.GoToAsync(TestConstants.EmptyPage);

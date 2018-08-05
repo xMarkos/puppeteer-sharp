@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using PuppeteerSharp.Helpers;
+using PuppeteerSharp.Threading;
 
 namespace PuppeteerSharp
 {
@@ -64,11 +65,11 @@ namespace PuppeteerSharp
         /// <summary>
         /// Occurs when the connection is closed.
         /// </summary>
-        public event EventHandler Closed;
+        public event AsyncEventHandler Closed;
         /// <summary>
         /// Occurs when a message from chromium is received.
         /// </summary>
-        public event EventHandler<MessageEventArgs> MessageReceived;
+        public event AsyncEventHandler<MessageEventArgs> MessageReceived;
         /// <summary>
         /// Gets or sets a value indicating whether this <see cref="Connection"/> is closed.
         /// </summary>
@@ -120,12 +121,12 @@ namespace PuppeteerSharp
         }
         #endregion
 
-        private void OnClose()
+        private async Task OnClose()
         {
             if (!IsClosed)
             {
                 _websocketReaderCancellationSource.Cancel();
-                Closed?.Invoke(this, new EventArgs());
+                await Closed.SafeInvoke(this, new EventArgs()).ConfigureAwait(false);
             }
 
             foreach (var session in _sessions.Values)
@@ -162,7 +163,7 @@ namespace PuppeteerSharp
             {
                 if (IsClosed)
                 {
-                    OnClose();
+                    await OnClose().ConfigureAwait(false);
                     return null;
                 }
 
@@ -190,7 +191,7 @@ namespace PuppeteerSharp
                     {
                         if (!IsClosed)
                         {
-                            OnClose();
+                            await OnClose().ConfigureAwait(false);
                             return null;
                         }
                     }
@@ -203,7 +204,7 @@ namespace PuppeteerSharp
                     }
                     else if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        OnClose();
+                        await OnClose().ConfigureAwait(false);
                         return null;
                     }
                 }
@@ -215,12 +216,12 @@ namespace PuppeteerSharp
                         await Task.Delay(Delay).ConfigureAwait(false);
                     }
 
-                    ProcessResponse(response);
+                    await ProcessResponse(response).ConfigureAwait(false);
                 }
             }
         }
 
-        private void ProcessResponse(string response)
+        private async Task ProcessResponse(string response)
         {
             dynamic obj = JsonConvert.DeserializeObject(response);
             var objAsJObject = obj as JObject;
@@ -247,7 +248,7 @@ namespace PuppeteerSharp
                     var session = _sessions.GetValueOrDefault(objAsJObject["params"]["sessionId"].ToString());
                     if (session != null)
                     {
-                        session.OnMessage(objAsJObject["params"]["message"].ToString());
+                        await session.OnMessage(objAsJObject["params"]["message"].ToString()).ConfigureAwait(false);
                     }
                 }
                 else if (obj.method == "Target.detachedFromTarget")
@@ -261,11 +262,11 @@ namespace PuppeteerSharp
                 }
                 else
                 {
-                    MessageReceived?.Invoke(this, new MessageEventArgs
+                    await MessageReceived.SafeInvoke(this, new MessageEventArgs
                     {
                         MessageID = obj.method,
                         MessageData = objAsJObject["params"] as dynamic
-                    });
+                    }).ConfigureAwait(false);
                 }
             }
         }
@@ -291,7 +292,7 @@ namespace PuppeteerSharp
         /// <see cref="Connection"/> was occupying.</remarks>
         public void Dispose()
         {
-            OnClose();
+            OnClose().GetAwaiter().GetResult();
             WebSocket.Dispose();
         }
 

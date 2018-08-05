@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using PuppeteerSharp.Helpers;
 using PuppeteerSharp.Messaging;
+using PuppeteerSharp.Threading;
 
 namespace PuppeteerSharp
 {
@@ -51,7 +52,7 @@ namespace PuppeteerSharp
             TargetsMap = new Dictionary<string, Target>();
             ScreenshotTaskQueue = new TaskQueue();
 
-            Connection.Closed += (object sender, EventArgs e) => Disconnected?.Invoke(this, new EventArgs());
+            Connection.Closed += (object sender, EventArgs e) => _disconnected.InvokeAsync(this, new EventArgs());
             Connection.MessageReceived += Connect_MessageReceived;
 
             _closeCallBack = closeCallBack;
@@ -62,6 +63,12 @@ namespace PuppeteerSharp
         internal readonly Dictionary<string, Target> TargetsMap;
         private readonly Func<Task> _closeCallBack;
         private readonly ILogger<Browser> _logger;
+
+        private EventInvocationList<EventArgs> _closed = new EventInvocationList<EventArgs>();
+        private EventInvocationList<EventArgs> _disconnected = new EventInvocationList<EventArgs>();
+        private EventInvocationList<TargetChangedArgs> _targetChanged = new EventInvocationList<TargetChangedArgs>();
+        private EventInvocationList<TargetChangedArgs> _targetCreated = new EventInvocationList<TargetChangedArgs>();
+        private EventInvocationList<TargetChangedArgs> _targetDestroyed = new EventInvocationList<TargetChangedArgs>();
         #endregion
 
         #region Properties
@@ -69,29 +76,84 @@ namespace PuppeteerSharp
         /// <summary>
         /// 
         /// </summary>
-        public event EventHandler Closed;
+        public event EventHandler Closed
+        {
+            add => _closed.Add(value.ConvertToGenericDelegate());
+            remove => _closed.Remove(value.ConvertToGenericDelegate());
+        }
+
+        /// <inheritdoc cref="Closed" />
+        public event AsyncEventHandler<EventArgs> ClosedAsync
+        {
+            add => _closed.Add(value);
+            remove => _closed.Remove(value);
+        }
 
         /// <summary>
         /// Raised when puppeteer gets disconnected from the Chromium instance. This might happen because one of the following
         /// - Chromium is closed or crashed
         /// - <see cref="Disconnect"/> method was called
         /// </summary>
-        public event EventHandler Disconnected;
+        public event EventHandler Disconnected
+        {
+            add => _disconnected.Add(value.ConvertToGenericDelegate());
+            remove => _disconnected.Remove(value.ConvertToGenericDelegate());
+        }
+
+        /// <inheritdoc cref="Disconnected" />
+        public event AsyncEventHandler<EventArgs> DisconnectedAsync
+        {
+            add => _disconnected.Add(value);
+            remove => _disconnected.Remove(value);
+        }
 
         /// <summary>
         /// Raised when the url of a target changes
         /// </summary>
-        public event EventHandler<TargetChangedArgs> TargetChanged;
+        public event EventHandler<TargetChangedArgs> TargetChanged
+        {
+            add => _targetChanged.Add(value);
+            remove => _targetChanged.Remove(value);
+        }
+
+        /// <inheritdoc cref="TargetChanged" />
+        public event AsyncEventHandler<TargetChangedArgs> TargetChangedAsync
+        {
+            add => _targetChanged.Add(value);
+            remove => _targetChanged.Remove(value);
+        }
 
         /// <summary>
         /// Raised when a target is created, for example when a new page is opened by <c>window.open</c> <see href="https://developer.mozilla.org/en-US/docs/Web/API/Window/open"/> or <see cref="NewPageAsync"/>.
         /// </summary>
-        public event EventHandler<TargetChangedArgs> TargetCreated;
+        public event EventHandler<TargetChangedArgs> TargetCreated
+        {
+            add => _targetCreated.Add(value);
+            remove => _targetCreated.Remove(value);
+        }
+
+        /// <inheritdoc cref="TargetCreated" />
+        public event AsyncEventHandler<TargetChangedArgs> TargetCreatedAsync
+        {
+            add => _targetCreated.Add(value);
+            remove => _targetCreated.Remove(value);
+        }
 
         /// <summary>
         /// Raised when a target is destroyed, for example when a page is closed
         /// </summary>
-        public event EventHandler<TargetChangedArgs> TargetDestroyed;
+        public event EventHandler<TargetChangedArgs> TargetDestroyed
+        {
+            add => _targetDestroyed.Add(value);
+            remove => _targetDestroyed.Remove(value);
+        }
+
+        /// <inheritdoc cref="TargetDestroyed" />
+        public event AsyncEventHandler<TargetChangedArgs> TargetDestroyedAsync
+        {
+            add => _targetDestroyed.Add(value);
+            remove => _targetDestroyed.Remove(value);
+        }
 
         /// <summary>
         /// Gets the Browser websocket url
@@ -214,37 +276,34 @@ namespace PuppeteerSharp
             }
 
             Disconnect();
-            Closed?.Invoke(this, new EventArgs());
+            await _closed.InvokeAsync(this, new EventArgs()).ConfigureAwait(false);
         }
 
         #endregion
 
         #region Private Methods
 
-        internal void ChangeTarget(Target target) => TargetChanged?.Invoke(this, new TargetChangedArgs
-        {
-            Target = target
-        });
+        internal Task ChangeTarget(Target target)
+            => _targetChanged.InvokeAsync(this, new TargetChangedArgs { Target = target });
 
-        private async void Connect_MessageReceived(object sender, MessageEventArgs e)
+        private Task Connect_MessageReceived(object sender, MessageEventArgs e)
         {
             switch (e.MessageID)
             {
                 case "Target.targetCreated":
-                    await CreateTargetAsync(e.MessageData.ToObject<TargetCreatedResponse>()).ConfigureAwait(false);
-                    return;
+                    return CreateTargetAsync(e.MessageData.ToObject<TargetCreatedResponse>());
 
                 case "Target.targetDestroyed":
-                    await DestroyTargetAsync(e.MessageData.ToObject<TargetDestroyedResponse>()).ConfigureAwait(false);
-                    return;
+                    return DestroyTargetAsync(e.MessageData.ToObject<TargetDestroyedResponse>());
 
                 case "Target.targetInfoChanged":
-                    ChangeTargetInfo(e.MessageData.ToObject<TargetCreatedResponse>());
-                    return;
+                    return ChangeTargetInfo(e.MessageData.ToObject<TargetCreatedResponse>());
             }
+
+            return Task.CompletedTask;
         }
 
-        private void ChangeTargetInfo(TargetCreatedResponse e)
+        private Task ChangeTargetInfo(TargetCreatedResponse e)
         {
             if (!TargetsMap.ContainsKey(e.TargetInfo.TargetId))
             {
@@ -252,7 +311,7 @@ namespace PuppeteerSharp
             }
 
             var target = TargetsMap[e.TargetInfo.TargetId];
-            target.TargetInfoChanged(e.TargetInfo);
+            return target.TargetInfoChanged(e.TargetInfo);
         }
 
         private async Task DestroyTargetAsync(TargetDestroyedResponse e)
@@ -269,10 +328,10 @@ namespace PuppeteerSharp
 
             if (await target.InitializedTask.ConfigureAwait(false))
             {
-                TargetDestroyed?.Invoke(this, new TargetChangedArgs
+                await _targetDestroyed.InvokeAsync(this, new TargetChangedArgs
                 {
                     Target = target
-                });
+                }).ConfigureAwait(false);
             }
         }
 
@@ -292,10 +351,10 @@ namespace PuppeteerSharp
 
             if (await target.InitializedTask.ConfigureAwait(false))
             {
-                TargetCreated?.Invoke(this, new TargetChangedArgs
+                await _targetCreated.InvokeAsync(this, new TargetChangedArgs
                 {
                     Target = target
-                });
+                }).ConfigureAwait(false);
             }
         }
 

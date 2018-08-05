@@ -96,7 +96,7 @@ namespace PuppeteerSharp
             return await Page.CreateAsync(session, this, Browser.IgnoreHTTPSErrors, !Browser.AppMode, Browser.ScreenshotTaskQueue).ConfigureAwait(false);
         }
 
-        internal void TargetInfoChanged(TargetInfo targetInfo)
+        internal async Task TargetInfoChanged(TargetInfo targetInfo)
         {
             var previousUrl = _targetInfo.Url;
             _targetInfo = targetInfo;
@@ -110,7 +110,7 @@ namespace PuppeteerSharp
 
             if (previousUrl != targetInfo.Url)
             {
-                Browser.ChangeTarget(this);
+                await Browser.ChangeTarget(this).ConfigureAwait(false);
             }
         }
 

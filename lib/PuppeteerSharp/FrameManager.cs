@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics.Contracts;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using PuppeteerSharp.Messaging;
+using PuppeteerSharp.Threading;
 
 namespace PuppeteerSharp
 {
@@ -21,16 +23,16 @@ namespace PuppeteerSharp
             _contextIdToContext = new Dictionary<int, ExecutionContext>();
             _logger = _client.Connection.LoggerFactory.CreateLogger<FrameManager>();
 
-            _client.MessageReceived += _client_MessageReceived;
-            HandleFrameTree(frameTree);
+            _client.MessageReceived += OnMessageReceived;
+            HandleFrameTree(frameTree).GetAwaiter().GetResult();
         }
 
         #region Properties
-        internal event EventHandler<FrameEventArgs> FrameAttached;
-        internal event EventHandler<FrameEventArgs> FrameDetached;
-        internal event EventHandler<FrameEventArgs> FrameNavigated;
-        internal event EventHandler<FrameEventArgs> FrameNavigatedWithinDocument;
-        internal event EventHandler<FrameEventArgs> LifecycleEvent;
+        internal event AsyncEventHandler<FrameEventArgs> FrameAttached;
+        internal event AsyncEventHandler<FrameEventArgs> FrameDetached;
+        internal event AsyncEventHandler<FrameEventArgs> FrameNavigated;
+        internal event AsyncEventHandler<FrameEventArgs> FrameNavigatedWithinDocument;
+        internal event AsyncEventHandler<FrameEventArgs> LifecycleEvent;
 
         internal Dictionary<string, Frame> Frames { get; set; }
         internal Frame MainFrame { get; set; }
@@ -60,78 +62,75 @@ namespace PuppeteerSharp
 
         #region Private Methods
 
-        private void _client_MessageReceived(object sender, MessageEventArgs e)
+        private Task OnMessageReceived(object sender, MessageEventArgs e)
         {
             switch (e.MessageID)
             {
                 case "Page.frameAttached":
-                    OnFrameAttached(
+                    return OnFrameAttached(
                         e.MessageData.SelectToken("frameId").ToObject<string>(),
                         e.MessageData.SelectToken("parentFrameId").ToObject<string>());
-                    break;
 
                 case "Page.frameNavigated":
-                    OnFrameNavigated(e.MessageData.SelectToken("frame").ToObject<FramePayload>());
-                    break;
+                    return OnFrameNavigated(e.MessageData.SelectToken("frame").ToObject<FramePayload>());
 
                 case "Page.navigatedWithinDocument":
-                    OnFrameNavigatedWithinDocument(e.MessageData.ToObject<NavigatedWithinDocumentResponse>());
-                    break;
+                    return OnFrameNavigatedWithinDocument(e.MessageData.ToObject<NavigatedWithinDocumentResponse>());
 
                 case "Page.frameDetached":
-                    OnFrameDetached(e.MessageData.ToObject<BasicFrameResponse>());
-                    break;
+                    return OnFrameDetached(e.MessageData.ToObject<BasicFrameResponse>());
 
                 case "Page.frameStoppedLoading":
-                    OnFrameStoppedLoading(e.MessageData.ToObject<BasicFrameResponse>());
-                    break;
+                    return OnFrameStoppedLoading(e.MessageData.ToObject<BasicFrameResponse>());
 
                 case "Runtime.executionContextCreated":
-                    OnExecutionContextCreated(e.MessageData.SelectToken("context").ToObject<ContextPayload>());
-                    break;
+                    return OnExecutionContextCreated(e.MessageData.SelectToken("context").ToObject<ContextPayload>());
 
                 case "Runtime.executionContextDestroyed":
-                    OnExecutionContextDestroyed(e.MessageData.SelectToken("executionContextId").ToObject<int>());
-                    break;
+                    return OnExecutionContextDestroyed(e.MessageData.SelectToken("executionContextId").ToObject<int>());
+
                 case "Runtime.executionContextsCleared":
-                    OnExecutionContextsCleared();
-                    break;
+                    return OnExecutionContextsCleared();
+
                 case "Page.lifecycleEvent":
-                    OnLifeCycleEvent(e.MessageData.ToObject<LifecycleEventResponse>());
-                    break;
+                    return OnLifeCycleEvent(e.MessageData.ToObject<LifecycleEventResponse>());
+
                 default:
-                    break;
+                    return Task.CompletedTask;
             }
         }
 
-        private void OnFrameStoppedLoading(BasicFrameResponse e)
+        private async Task OnFrameStoppedLoading(BasicFrameResponse e)
         {
             if (Frames.TryGetValue(e.FrameId, out var frame))
             {
                 frame.OnLoadingStopped();
-                LifecycleEvent?.Invoke(this, new FrameEventArgs(frame));
+                await LifecycleEvent.SafeInvoke(this, new FrameEventArgs(frame)).ConfigureAwait(false);
             }
         }
 
-        private void OnLifeCycleEvent(LifecycleEventResponse e)
+        private async Task OnLifeCycleEvent(LifecycleEventResponse e)
         {
             if (Frames.TryGetValue(e.FrameId, out var frame))
             {
                 frame.OnLifecycleEvent(e.LoaderId, e.Name);
-                LifecycleEvent?.Invoke(this, new FrameEventArgs(frame));
+                await LifecycleEvent.SafeInvoke(this, new FrameEventArgs(frame)).ConfigureAwait(false);
             }
         }
 
-        private void OnExecutionContextsCleared()
+        private Task OnExecutionContextsCleared()
         {
             foreach (var context in _contextIdToContext.Values)
             {
                 RemoveContext(context);
             }
+
             _contextIdToContext.Clear();
+
+            return Task.CompletedTask;
         }
 
-        private void OnExecutionContextDestroyed(int executionContextId)
+        private Task OnExecutionContextDestroyed(int executionContextId)
         {
             _contextIdToContext.TryGetValue(executionContextId, out var context);
 
@@ -140,9 +139,11 @@ namespace PuppeteerSharp
                 _contextIdToContext.Remove(executionContextId);
                 RemoveContext(context);
             }
+
+            return Task.CompletedTask;
         }
 
-        private void OnExecutionContextCreated(ContextPayload contextPayload)
+        private Task OnExecutionContextCreated(ContextPayload contextPayload)
         {
             var frameId = contextPayload.AuxData.IsDefault ? contextPayload.AuxData.FrameId : null;
             var frame = !string.IsNullOrEmpty(frameId) ? Frames[frameId] : null;
@@ -159,17 +160,19 @@ namespace PuppeteerSharp
             {
                 frame.SetDefaultContext(context);
             }
+
+            return Task.CompletedTask;
         }
 
-        private void OnFrameDetached(BasicFrameResponse e)
+        private async Task OnFrameDetached(BasicFrameResponse e)
         {
             if (Frames.TryGetValue(e.FrameId, out var frame))
             {
-                RemoveFramesRecursively(frame);
+                await RemoveFramesRecursively(frame).ConfigureAwait(false);
             }
         }
 
-        private void OnFrameNavigated(FramePayload framePayload)
+        private async Task OnFrameNavigated(FramePayload framePayload)
         {
             var isMainFrame = string.IsNullOrEmpty(framePayload.ParentId);
             var frame = isMainFrame ? MainFrame : Frames[framePayload.Id];
@@ -181,7 +184,7 @@ namespace PuppeteerSharp
             {
                 while (frame.ChildFrames.Count > 0)
                 {
-                    RemoveFramesRecursively(frame.ChildFrames[0]);
+                    await RemoveFramesRecursively(frame.ChildFrames[0]).ConfigureAwait(false);
                 }
             }
 
@@ -210,18 +213,18 @@ namespace PuppeteerSharp
             // Update frame payload.
             frame.Navigated(framePayload);
 
-            FrameNavigated?.Invoke(this, new FrameEventArgs(frame));
+            await FrameNavigated.SafeInvoke(this, new FrameEventArgs(frame)).ConfigureAwait(false);
         }
 
-        private void OnFrameNavigatedWithinDocument(NavigatedWithinDocumentResponse e)
+        private async Task OnFrameNavigatedWithinDocument(NavigatedWithinDocumentResponse e)
         {
             if (Frames.TryGetValue(e.FrameId, out var frame))
             {
                 frame.NavigatedWithinDocument(e.Url);
 
                 var eventArgs = new FrameEventArgs(frame);
-                FrameNavigatedWithinDocument?.Invoke(this, eventArgs);
-                FrameNavigated?.Invoke(this, eventArgs);
+                await FrameNavigatedWithinDocument.SafeInvoke(this, eventArgs).ConfigureAwait(false);
+                await FrameNavigated.SafeInvoke(this, eventArgs).ConfigureAwait(false);
             }
         }
 
@@ -233,42 +236,42 @@ namespace PuppeteerSharp
             }
         }
 
-        private void RemoveFramesRecursively(Frame frame)
+        private async Task RemoveFramesRecursively(Frame frame)
         {
             while (frame.ChildFrames.Count > 0)
             {
-                RemoveFramesRecursively(frame.ChildFrames[0]);
+                await RemoveFramesRecursively(frame.ChildFrames[0]).ConfigureAwait(false);
             }
             frame.Detach();
             Frames.Remove(frame.Id);
-            FrameDetached?.Invoke(this, new FrameEventArgs(frame));
+            await FrameDetached.SafeInvoke(this, new FrameEventArgs(frame)).ConfigureAwait(false);
         }
 
-        private void OnFrameAttached(string frameId, string parentFrameId)
+        private async Task OnFrameAttached(string frameId, string parentFrameId)
         {
             if (!Frames.ContainsKey(frameId) && Frames.ContainsKey(parentFrameId))
             {
                 var parentFrame = Frames[parentFrameId];
                 var frame = new Frame(_client, _page, parentFrame, frameId);
                 Frames[frame.Id] = frame;
-                FrameAttached?.Invoke(this, new FrameEventArgs(frame));
+                await FrameAttached.SafeInvoke(this, new FrameEventArgs(frame)).ConfigureAwait(false);
             }
         }
 
-        private void HandleFrameTree(FrameTree frameTree)
+        private async Task HandleFrameTree(FrameTree frameTree)
         {
             if (!string.IsNullOrEmpty(frameTree.Frame.ParentId))
             {
-                OnFrameAttached(frameTree.Frame.Id, frameTree.Frame.ParentId);
+                await OnFrameAttached(frameTree.Frame.Id, frameTree.Frame.ParentId).ConfigureAwait(false);
             }
 
-            OnFrameNavigated(frameTree.Frame);
+            await OnFrameNavigated(frameTree.Frame).ConfigureAwait(false);
 
             if (frameTree.Childs != null)
             {
                 foreach (var child in frameTree.Childs)
                 {
-                    HandleFrameTree(child);
+                    await HandleFrameTree(child).ConfigureAwait(false);
                 }
             }
         }

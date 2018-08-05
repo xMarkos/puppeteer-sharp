@@ -83,7 +83,7 @@ namespace PuppeteerSharp
         {
             var taskWrapper = new TaskCompletionSource<string>();
 
-            async void EventHandler(object sender, TracingCompleteEventArgs e)
+            async Task EventHandler(object sender, TracingCompleteEventArgs e)
             {
                 var tracingData = await ReadStream(e.Stream, _path).ConfigureAwait(false);
                 _client.TracingComplete -= EventHandler;

@@ -17,7 +17,7 @@ namespace PuppeteerSharp.Tests.PageTests.Events
         [Fact]
         public async Task ShouldFire()
         {
-            Page.Dialog += async (sender, e) =>
+            Page.DialogAsync += async (sender, e) =>
             {
                 Assert.Equal(DialogType.Alert, e.Dialog.DialogType);
                 Assert.Equal(string.Empty, e.Dialog.DefaultValue);
@@ -32,7 +32,7 @@ namespace PuppeteerSharp.Tests.PageTests.Events
         [Fact]
         public async Task ShouldAllowAcceptingPrompts()
         {
-            Page.Dialog += async (sender, e) =>
+            Page.DialogAsync += async (sender, e) =>
             {
                 Assert.Equal(DialogType.Prompt, e.Dialog.DialogType);
                 Assert.Equal("yes.", e.Dialog.DefaultValue);
@@ -48,7 +48,7 @@ namespace PuppeteerSharp.Tests.PageTests.Events
         [Fact]
         public async Task ShouldDismissThePrompt()
         {
-            Page.Dialog += async (sender, e) =>
+            Page.DialogAsync += async (sender, e) =>
             {
                 await e.Dialog.Dismiss();
             };
